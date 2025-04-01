@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Redirecting to Phantom...</title>
+    <title>Can Opener - Phantom Integration</title>
+    <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -21,6 +22,9 @@
         .container {
             max-width: 500px;
             padding: 20px;
+            background-color: #2a2a2a;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
         }
         
         .logo {
@@ -48,14 +52,111 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+        
+        .button {
+            background-color: #AB9FF2;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-block;
+            margin-top: 20px;
+            text-decoration: none;
+        }
+        
+        .button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .button:hover:not(:disabled) {
+            background-color: #9b8de0;
+        }
+        
+        .status-message {
+            min-height: 60px;
+            margin: 20px 0;
+        }
+        
+        .transaction-details {
+            background-color: #333;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            text-align: left;
+        }
+        
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #444;
+        }
+        
+        .detail-label {
+            color: #aaa;
+        }
+        
+        .detail-value {
+            color: #fff;
+            word-break: break-all;
+        }
+        
+        .return-button {
+            margin-top: 20px;
+            color: #AB9FF2;
+            background: none;
+            border: none;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        
+        .success {
+            color: #55ff7f;
+        }
+        
+        .error {
+            color: #ff5555;
+        }
+        
+        .warning {
+            color: #ffaa55;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <img src="https://placehold.co/80x80/AB9FF2/ffffff?text=CO" alt="Can Opener Logo" class="logo">
-        <h1>Redirecting to Phantom Wallet</h1>
-        <p>You'll be redirected to complete your transaction in just a moment...</p>
-        <div class="loading"></div>
+        
+        <h1>Can Opener Tip</h1>
+        
+        <div class="transaction-details">
+            <div class="detail-row">
+                <div class="detail-label">Amount:</div>
+                <div class="detail-value" id="amount-value">0.1 SOL</div>
+            </div>
+            <div class="detail-row">
+                <div class="detail-label">Recipient:</div>
+                <div class="detail-value" id="address-value">Loading...</div>
+            </div>
+        </div>
+        
+        <div id="status-message" class="status-message">
+            Checking for Phantom wallet...
+        </div>
+        
+        <div id="loading" class="loading"></div>
+        
+        <button id="connect-button" class="button" disabled>Connect Wallet</button>
+        <button id="send-button" class="button" style="display: none;">Send Tip</button>
+        
+        <div>
+            <button id="return-button" class="return-button">Return to Can Opener</button>
+        </div>
     </div>
 
     <script>
@@ -68,18 +169,173 @@
             };
         }
         
-        // When page loads, immediately redirect to Phantom
+        // Update UI elements
+        const params = getUrlParams();
+        document.getElementById('amount-value').textContent = `${params.amount} SOL`;
+        document.getElementById('address-value').textContent = params.address;
+        
+        // DOM elements
+        const statusMessage = document.getElementById('status-message');
+        const loadingIndicator = document.getElementById('loading');
+        const connectButton = document.getElementById('connect-button');
+        const sendButton = document.getElementById('send-button');
+        const returnButton = document.getElementById('return-button');
+        
+        // Variables
+        let phantomProvider = null;
+        let publicKey = null;
+        
+        // Show status
+        function setStatus(message, type = '') {
+            statusMessage.textContent = message;
+            statusMessage.className = 'status-message';
+            
+            if (type) {
+                statusMessage.classList.add(type);
+            }
+        }
+        
+        // Show/hide loading
+        function setLoading(isLoading) {
+            if (isLoading) {
+                loadingIndicator.style.display = 'inline-block';
+                connectButton.disabled = true;
+                if (sendButton.style.display !== 'none') {
+                    sendButton.disabled = true;
+                }
+            } else {
+                loadingIndicator.style.display = 'none';
+                connectButton.disabled = false;
+                if (sendButton.style.display !== 'none') {
+                    sendButton.disabled = false;
+                }
+            }
+        }
+        
+        // Check if Phantom is installed
+        function checkPhantomWallet() {
+            if (window.solana && window.solana.isPhantom) {
+                phantomProvider = window.solana;
+                setStatus('Phantom detected! Click "Connect Wallet" to continue.');
+                connectButton.disabled = false;
+                return true;
+            } else if (window.phantom?.solana?.isPhantom) {
+                phantomProvider = window.phantom.solana;
+                setStatus('Phantom detected! Click "Connect Wallet" to continue.');
+                connectButton.disabled = false;
+                return true;
+            } else {
+                setStatus('Phantom wallet not detected. Please install Phantom to continue.', 'error');
+                
+                // Add install link
+                statusMessage.innerHTML += `<br><br><a href="https://phantom.app/download" target="_blank" style="color: #AB9FF2;">Install Phantom Wallet</a>`;
+                return false;
+            }
+        }
+        
+        // Connect to wallet
+        async function connectWallet() {
+            try {
+                setLoading(true);
+                setStatus('Connecting to Phantom...');
+                
+                // Connect
+                const { publicKey: connectedPublicKey } = await phantomProvider.connect();
+                publicKey = connectedPublicKey;
+                
+                // Update UI
+                setStatus(`Connected: ${publicKey.toString().slice(0, 4)}...${publicKey.toString().slice(-4)}`, 'success');
+                connectButton.style.display = 'none';
+                sendButton.style.display = 'inline-block';
+                sendButton.disabled = false;
+            } catch (error) {
+                console.error('Connection error:', error);
+                setStatus(`Error connecting: ${error.message || 'Unknown error'}`, 'error');
+            } finally {
+                setLoading(false);
+            }
+        }
+        
+        // Send transaction
+        async function sendTransaction() {
+            try {
+                if (!publicKey) {
+                    setStatus('Please connect your wallet first', 'warning');
+                    return;
+                }
+                
+                setLoading(true);
+                setStatus('Creating transaction...');
+                
+                // Convert amount to lamports
+                const lamports = Math.floor(params.amount * 1000000000);
+                
+                // Create a Solana connection
+                const connection = new solanaWeb3.Connection(
+                    solanaWeb3.clusterApiUrl('mainnet-beta'),
+                    'confirmed'
+                );
+                
+                // Create transaction
+                const transaction = new solanaWeb3.Transaction().add(
+                    solanaWeb3.SystemProgram.transfer({
+                        fromPubkey: publicKey,
+                        toPubkey: new solanaWeb3.PublicKey(params.address),
+                        lamports: lamports
+                    })
+                );
+                
+                // Get recent blockhash
+                const { blockhash } = await connection.getLatestBlockhash();
+                transaction.recentBlockhash = blockhash;
+                transaction.feePayer = publicKey;
+                
+                // Sign and send transaction
+                setStatus('Please approve the transaction in Phantom...');
+                const signature = await phantomProvider.signAndSendTransaction(transaction);
+                
+                setStatus('Transaction submitted! Confirming...', 'warning');
+                
+                // Wait for confirmation
+                const confirmation = await connection.confirmTransaction(signature.signature);
+                
+                if (confirmation.value.err) {
+                    throw new Error('Transaction failed to confirm');
+                }
+                
+                // Show success
+                setStatus('Transaction successful! Thank you for your support.', 'success');
+                sendButton.disabled = true;
+                sendButton.textContent = 'Tip Sent ✓';
+                
+                // Add transaction link
+                statusMessage.innerHTML += `<br><br><a href="https://explorer.solana.com/tx/${signature.signature}" target="_blank" style="color: #AB9FF2;">View on Solana Explorer</a>`;
+                
+            } catch (error) {
+                console.error('Transaction error:', error);
+                
+                if (error.message?.includes('User rejected')) {
+                    setStatus('Transaction cancelled by user', 'warning');
+                } else {
+                    setStatus(`Transaction error: ${error.message || 'Unknown error'}`, 'error');
+                }
+            } finally {
+                setLoading(false);
+            }
+        }
+        
+        // Return to extension
+        returnButton.addEventListener('click', function() {
+            window.close();
+        });
+        
+        // Add event listeners
+        connectButton.addEventListener('click', connectWallet);
+        sendButton.addEventListener('click', sendTransaction);
+        
+        // Initialize
         window.addEventListener('load', function() {
-            const params = getUrlParams();
-            const formattedAmount = parseFloat(params.amount).toFixed(2);
-            
-            // Create Phantom transfer URL
-            const phantomUrl = `https://phantom.app/ul/transfer?recipient=${encodeURIComponent(params.address)}&amount=${encodeURIComponent(formattedAmount)}`;
-            
-            // Redirect after a brief delay (gives time to show the loading screen)
-            setTimeout(function() {
-                window.location.href = phantomUrl;
-            }, 1500);
+            setTimeout(checkPhantomWallet, 500);
         });
     </script>
 </body>
